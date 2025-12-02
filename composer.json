@@ -1,0 +1,14 @@
+{
+  "name": "betocampoy/cora-sdk",
+  "description": "SDK PHP para integrar com as APIs da Cora na modalidade Integracao Direta (mTLS + client_credentials).",
+  "type": "library",
+  "license": "MIT",
+  "autoload": {
+    "psr-4": {
+      "BetoCampoy\\CoraSdk\\": "src/"
+    }
+  },
+  "require": {
+    "php": ">=8.1"
+  }
+}

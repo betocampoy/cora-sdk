@@ -1,0 +1,21 @@
+# Composer
+/vendor/
+/composer.lock
+
+# IDEs
+/.idea/
+/.vscode/
+
+# PHPStorm
+*.iml
+
+# Logs
+*.log
+
+# Cache
+/.cache/
+/tmp/
+
+# Env
+.env
+.env.*
