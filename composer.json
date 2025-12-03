@@ -10,6 +10,7 @@
   },
   "require": {
     "php": ">=8.1",
-    "ext-curl": "*"
+    "ext-curl": "*",
+    "endroid/qr-code": "^6.0"
   }
 }

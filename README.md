@@ -64,196 +64,175 @@ CORA_TIMEOUT=30
 
 ---
 
-## 🔐 Conexão Segura (mTLS)
-
-A API da Cora exige **Autenticação Mútua TLS (mTLS)**.
-
-Isso significa que:
-
-1. O servidor envia seu certificado SSL (como em qualquer HTTPS).
-2. O cliente **também** precisa enviar um certificado (PFX/P12) válido.
-3. O `CoraClient` configura automaticamente o cURL para usar esse certificado.
-
-Erros comuns de certificado são convertidos para exceções específicas:
-
-- `TransportException` — falhas de rede, cURL, SSL, certificado, timeout etc.
-- `ApiException` — a API respondeu com erro HTTP (4xx / 5xx), com status code e body disponíveis.
 
 ---
 
-## 🔧 Uso — PHP Puro (Legado)
+## 🔐 Conexão Segura (mTLS)
 
-Exemplo de criação de boleto:
+O SDK configura automaticamente cURL com:
+
+- Certificado cliente PFX/P12
+- Senha do certificado
+- Auth mTLS bidirecional
+- Timeout configurável
+
+Erros são convertidos para exceções:
+
+- `TransportException` → falhas de rede / SSL
+- `ApiException` → erros HTTP retornados pela Cora
+
+---
+
+## 🧰 Uso em PHP puro
+
+Criando cobrança:
 
 ~~~php
-use BetoCampoy\CoraSdk\CoraConfig;
-use BetoCampoy\CoraSdk\CoraClient;
-use BetoCampoy\CoraSdk\Service\InvoiceService;
-use BetoCampoy\CoraSdk\Exceptions\ApiException;
-use BetoCampoy\CoraSdk\Exceptions\TransportException;
-
 $config = CoraConfig::fromEnv();
 $client = new CoraClient($config);
+
 $invoiceService = new InvoiceService($client);
 
-$payload = [
-    "code" => "mensalidade_123_2025-11",
-    "amount" => 19990, // em centavos
-    "description" => "Mensalidade Minha Encomenda - Novembro",
+$invoice = $invoiceService->createInvoice([
+    "code" => "mensal_123",
+    "amount" => 19990,
+    "description" => "Mensalidade",
     "customer" => [
         "name" => "Transportadora XPTO",
         "document" => "12345678000155",
-        "email" => "financeiro@empresa.com",
-    ],
-    // demais campos conforme documentação da Cora
-];
-
-try {
-    $invoice = $invoiceService->createBoleto($payload);
-
-    // Exemplo: acessar campos retornados
-    // $invoice['id'], $invoice['digitable_line'], $invoice['qr_code'], etc.
-    print_r($invoice);
-} catch (ApiException $e) {
-    echo "Erro API Cora ({$e->getStatusCode()}): " . $e->getMessage();
-    var_dump($e->getResponseBody());
-} catch (TransportException $e) {
-    echo "Erro de transporte/SSL: " . $e->getMessage();
-}
+        "email" => "financeiro@empresa.com"
+    ]
+]);
 ~~~
 
 ---
 
-## 🧰 Uso — Symfony
+# ✨ NOVO EM v0.1.2 — GERAÇÃO NATIVA DE QR CODE PIX
 
-Registrando os serviços no `services.yaml`:
+O SDK agora inclui o serviço **PixQrCodeGenerator**, que encapsula automaticamente o pacote `endroid/qr-code`.
 
-~~~yaml
-services:
-    BetoCampoy\CoraSdk\CoraConfig:
-        factory: ['BetoCampoy\CoraSdk\CoraConfig', 'fromEnv']
+Você passa **somente o EMV** retornado pela Cora → e ele devolve diretamente a **Data URI** para `<img src="">`.
 
-    BetoCampoy\CoraSdk\CoraClient:
-        arguments:
-            $config: '@BetoCampoy\CoraSdk\CoraConfig'
+---
 
-    BetoCampoy\CoraSdk\Service\InvoiceService:
-        arguments:
-            $client: '@BetoCampoy\CoraSdk\CoraClient'
-~~~
-
-Usando em um serviço da aplicação:
+## 📌 Exemplo em PHP puro
 
 ~~~php
-use BetoCampoy\CoraSdk\Service\InvoiceService;
+use BetoCampoy\CoraSdk\Service\PixQrCodeGenerator;
 
-class MonthlyBillingService
+$qr = new PixQrCodeGenerator();
+
+$emv = $invoice['pix']['emv']; // retornado pela Cora
+
+$dataUri = $qr->dataUriFromEmv($emv);
+
+echo '<img src="' . $dataUri . '" />';
+~~~
+
+---
+
+## 📌 Exemplo em Symfony (Controller)
+
+~~~php
+$qrcode = $pixQrCodeGenerator->dataUriFromEmv($invoice['pix']['emv']);
+
+return $this->render('billing/pix.html.twig', [
+    'qrcode' => $qrcode
+]);
+~~~
+
+Twig:
+
+~~~twig
+<img src="{{ qrcode }}" alt="Pix QR Code" class="img-fluid" />
+~~~
+
+---
+
+## 🧩 Serviço PixQrCodeGenerator
+
+~~~php
+class PixQrCodeGenerator
 {
     public function __construct(
-        private InvoiceService $invoiceService,
+        private int $defaultSize = 700,
+        private int $defaultMargin = 5
     ) {}
 
-    public function gerarCobranca(/* ... */): void
+    public function dataUriFromEmv(string $emv, ?int $size = null, ?int $margin = null): string
     {
-        $payload = [
-            // montar payload da cobrança aqui
-        ];
+        $builder = new Builder(
+            writer: new PngWriter(),
+            writerOptions: [],
+            validateResult: false,
+            data: $emv,
+            size: $size ?? $this->defaultSize,
+            margin: $margin ?? $this->defaultMargin,
+            roundBlockSizeMode: RoundBlockSizeMode::Margin,
+        );
 
-        $invoice = $invoiceService->createBoleto($payload);
+        return $builder->build()->getDataUri();
+    }
 
-        // persistir dados da cobrança retornada etc.
+    public function pngFromEmv(string $emv): string
+    {
+        return $builder->build()->getString();
     }
 }
 ~~~
 
 ---
 
-## 🧾 Endpoints disponíveis (v0.1.0)
+## 🧾 Endpoints disponíveis (v0.1.2)
 
-### `InvoiceService`
+### InvoiceService
+- `createInvoice(array $payload): array`
+- `createBoleto(array $payload): array`
+- `getInvoice(string $invoiceId): array`
+- `cancelInvoice(string $invoiceId): array`
 
-- `createInvoice(array $payload): array`  
-  Cria uma cobrança genérica (boleto, pix, boleto+pix) conforme o payload da Cora.
-
-- `createBoleto(array $payload): array`  
-  Alias semântico para criação de boleto usando `createInvoice`.
-
-- `getInvoice(string $invoiceId): array`  
-  Consulta detalhes de uma cobrança.
-
-- `cancelInvoice(string $invoiceId, ?array $payload = null): array`  
-  Solicita o cancelamento de uma cobrança (se suportado pela API).
+### PixQrCodeGenerator
+- `dataUriFromEmv(string $emv): string`
+- `pngFromEmv(string $emv): string`
 
 ---
 
-## 🗂 Estrutura do Projeto
-
-~~~text
-src/
-  CoraConfig.php
-  CoraClient.php
-  Exceptions/
-    ApiException.php
-    TransportException.php
-  Service/
-    InvoiceService.php
-composer.json
-README.md
-~~~
-
----
-
-## 🚨 Troubleshooting (erros comuns)
+## 🚨 Troubleshooting
 
 ### ❌ "could not load PEM client certificate"
-
-Possíveis causas:
-
-- Caminho do certificado (`CORA_CERT_PATH`) inválido.
-- Permissões de leitura do arquivo.
-- Formato incompatível ou corrompido.
+- Caminho incorreto
+- Permissões
+- Certificado corrompido
 
 ### ❌ "schannel: next InitializeSecurityContext failed"
+- Problemas de cadeia PFX no Windows
 
-Mais comum em Windows quando:
-
-- O certificado contém cadeia completa que o sistema não aceita.
-- Falta de permissões do usuário para acessar o certificado.
-
-Sugestões:
-
-- Exportar o PFX novamente com cadeias limitadas.
-- Testar antes via `curl` na linha de comando com o mesmo certificado.
-
-### ❌ HTTP 400 / 401 / 403 (ApiException)
-
-Verifique:
-
-- Se o client-id/client-secret são do ambiente correto (stage vs produção).
-- Se o payload enviado está idêntico ao exemplo da documentação da Cora.
-- Se os escopos do client permitem o endpoint utilizado.
+### ❌ HTTP 400 / 401 / 403
+- Client ID/Secret incorretos
+- Ambiente errado (stage vs production)
+- Payload fora do padrão Cora
 
 ---
 
 ## 🗺 Roadmap
 
+- [x] QRCode Pix nativo
 - [ ] Transferências
-- [ ] Pagamento de boletos (payments)
+- [ ] Pagamento de boletos
 - [ ] Extrato bancário
-- [ ] Webhooks + verificação de assinatura
-- [ ] Bundle Symfony dedicado (`betocampoy/cora-bundle`)
-- [ ] Testes automatizados com PHPUnit
-- [ ] Mock server local para desenvolvimento
+- [ ] Webhooks
+- [ ] Symfony Bundle oficial
+- [ ] Testes automatizados
+- [ ] Mock server local
 
 ---
 
 ## 📄 Licença
 
-Licenciado sob a licença **MIT** — uso livre para projetos pessoais e comerciais.
+MIT
 
 ---
 
 ## ✨ Autor
 
-**Beto Campoy**  
-Criador do SDK e responsável pela integração com sistemas como Minha Encomenda, Amo e Quero Vinho, OrganizzeMe, entre outros.
+Beto Campoy
